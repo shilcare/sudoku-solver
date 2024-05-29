@@ -2,6 +2,7 @@
 import cv2
 import numpy as np
 import pytesseract
+import json
 
 
 def is_contour_good(c):
@@ -25,7 +26,7 @@ def is_contour_good(c):
     )
 
 
-def recognize(img):
+def recognize(img, sessionId):
     """
     recognize sudoku from given image
     """
@@ -40,9 +41,8 @@ def recognize(img):
     selected_contours = [c for c in contours if is_contour_good(c)[0]]
 
     boundingBoxes = [cv2.boundingRect(c) for c in selected_contours]
-    assert (
-        len(boundingBoxes) == 81
-    ), f"Expected 81 bounding boxes, got {len(boundingBoxes)}"
+    if len(boundingBoxes) != 81:
+        return f"event: error\ndata: Expected 81 bounding boxes, got {len(boundingBoxes)}\n\n"
     average_height = sum([h for (_, _, _, h) in boundingBoxes]) / len(boundingBoxes)
     # sort the boxes row by row
     boundingBoxes = sorted(
@@ -55,6 +55,9 @@ def recognize(img):
         # Crop the cell from the image
         cropped_images.append(binary_img[y : y + h, x : x + w])
 
+    pytesseract.pytesseract.tesseract_cmd = (
+        "C:/Users/xuwu/AppData/Local/Programs/Tesseract-OCR/tesseract.exe"
+    )
     cell_values = []
     for i, cell in enumerate(cropped_images):
         r, c = divmod(i, 9)
@@ -82,8 +85,12 @@ def recognize(img):
         # Use Tesseract to recognize the number
         config = "--psm 10 --oem 3 -c tessedit_char_whitelist=123456789"
         value = pytesseract.image_to_string(cell, config=config)
-        cell_values.append(value.strip() if value.strip() else "0")
+        value = int(value.strip() if value.strip() else "0")
+        payload = json.dumps({"cellIndex": i, "cellValue": value})
+        yield f"data: {payload}\n\n"
+        cell_values.append(value)
 
-    print(f"recognized cell values: {np.array(cell_values).reshape(9, 9)}")
-
-    return "".join(cell_values)
+    print(
+        f"[{sessionId}] recognized cell values: \n{np.array(cell_values).reshape(9, 9)}"
+    )
+    yield f"event: complete\ndata: close\n\n"
